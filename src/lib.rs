@@ -9,7 +9,7 @@ pub fn serialize_derive(input: TokenStream) -> TokenStream {
     let ast = syn::parse(input).unwrap();
 
     // Build the trait implementation
-    // println!("{}", impl_serialize_macro(&ast).to_string());
+    println!("{}", impl_serialize_macro(&ast).to_string());
     impl_serialize_macro(&ast)
 }
 fn impl_serialize_macro(ast: &syn::DeriveInput) -> TokenStream {
@@ -22,41 +22,103 @@ fn impl_serialize_macro(ast: &syn::DeriveInput) -> TokenStream {
 fn impl_serialize_struct_macro(ast: &syn::DeriveInput) -> TokenStream {
     let name = &ast.ident;
     let attrs = &ast.data;
+    let mut is_tuple_struct = false;
     let struct_data = match attrs {
         syn::Data::Struct(r#struct) => r#struct,
         syn::Data::Enum(_) => todo!(),
         syn::Data::Union(_) => todo!(),
     };
-    let fields = &struct_data.fields;
-    // for field in attributes {
-    //     // println!("{:?}: {:?}",field.ident, field.ty);
-    // }
-    let field_names: &Vec<&Option<syn::Ident>> = &fields.iter().map(|x| &x.ident).collect();
-    let types: &Vec<&Type> = &fields.iter().map(|x| &x.ty).collect();
-    let gen = quote! {
-        impl Serialize for #name {
-            fn serialize(self) -> serialr::Bytes {
-                let mut bytes = serialr::Bytes::new();
-                #(bytes.append(&self.#field_names.serialize());)*
-                return bytes;
-            }
-            fn deserialize(bytes: &serialr::Bytes, mut index: usize) -> Option<Self> {
-                let (#(#field_names),*): (#(#types),*);
-                #(if let Some(field) = bytes.read(index) {
-                    #field_names = field;
-                    index += #field_names.size();
-                } else {
-                    return None;
-                })*
-                return Some(#name { #(#field_names),* });
-            }
-            fn size(&self) -> usize {
-                #(self.#field_names.size())+*
-            }
-
+    
+    let mut fields: Vec<(String, String)> = vec![];
+    let mut i = 0;
+    for field in &struct_data.fields {
+        if field.ident.is_some() {
+            fields.push((format!("{}",field.ident.clone().unwrap()), (&field.ty).into_token_stream().to_string()));
+        } else {
+            is_tuple_struct = true;
+            fields.push((format!("{}",i), (&field.ty).into_token_stream().to_string()));
         }
-    };
-    gen.into()
+        i +=1;
+    }
+    
+    // let fields = &struct_data.fields;
+    
+    // let fields: &Vec<&syn::Ident> = &attributes.iter().map(|x| &x.ident).collect();
+    // let types: &Vec<&Field> = &attributes.iter().map(|x| &x.fields).collect();
+    
+    // serialize parts
+    let mut pushes: Vec<String> = vec![];
+    for field in &fields {
+        pushes.push(format!("bytes.append(&self.{}.serialize());",field.0));
+    }
+    let serialize = format!("
+    let mut bytes = serialr::Bytes::new();
+    {}
+    return bytes;",
+    pushes.join("\n"),
+    );
+    // deserialize parts
+    let mut matches: Vec<String> = vec![];
+    let mut names: Vec<String> = vec![];
+    let mut types: Vec<String> = vec![];
+    for variant in &fields {
+        let name: String;
+        if variant.0.parse::<usize>().is_ok() {
+            name = format!("field{}",variant.0);
+            names.push(name.clone());
+        } else {
+            name = variant.0.clone();
+            names.push(name.clone());
+        }
+        types.push(variant.1.clone());
+        matches.push(format!("if let Some(field) = bytes.read(index) {{
+            {} = field;
+            index += {}.size();
+        }} else {{
+            return None;
+        }}",name, name));
+    }
+    let return_statement: String;
+    if fields.is_empty() {
+        return_statement = format!("return Some(Self);")
+    } else if is_tuple_struct {
+        return_statement = format!("return Some(Self({}));",names.join(", "));
+    } else {
+        return_statement = format!("return Some(Self {{{}}});",names.join(", "))
+    }
+    let deserialize: String;
+    if fields.is_empty() {
+        deserialize = format!("return Some(Self);")
+    } else {
+        deserialize = format!("let ({}): ({});
+        {} {}", names.join(", "), types.join(", "), matches.join(""), return_statement);
+    }
+    // size parts
+    let mut get_size: Vec<String> = vec![];
+    for variant in fields {
+        get_size.push(format!("self.{}.size()",variant.0));
+    }
+    let get_size = format!("{}", get_size.join(" + "));
+
+    let res = format!(
+        r#"impl Serialize for {} {{
+            fn serialize(self) -> serialr::Bytes {{
+                {}
+            }}
+            fn deserialize(bytes: &serialr::Bytes, mut index: usize) -> Option<Self> {{
+                {}
+            }}
+            fn size(&self) -> usize {{
+                {}
+            }}
+            
+        }}"#,
+        name,
+        serialize,
+        deserialize,
+        get_size,
+    );
+    res.parse().unwrap()
 }
 
 fn impl_serialize_enum_macro(ast: &syn::DeriveInput) -> TokenStream {
@@ -89,8 +151,12 @@ fn impl_serialize_enum_macro(ast: &syn::DeriveInput) -> TokenStream {
     let mut pushes: Vec<String> = vec![];
     for variant in attributes {
         let variant_name = &variant.ident;
-        let args = "_,".repeat(variant.fields.len());
-        matches.push(format!("Self::{}({}) => {}", variant_name, args, i));
+        if variant.fields.is_empty() {
+            matches.push(format!("Self::{} => {}", variant_name, i));
+        } else {
+            let args = "_,".repeat(variant.fields.len());
+            matches.push(format!("Self::{}({}) => {}", variant_name, args, i));
+        }
         let mut serialize_attr = vec![];
         let mut serialize_code = vec![];
         let mut j = 0;
@@ -99,12 +165,20 @@ fn impl_serialize_enum_macro(ast: &syn::DeriveInput) -> TokenStream {
             serialize_code.push(format!("bytes.append(&field{}.serialize());", j));
             j += 1;
         }
-        pushes.push(format!(
-            "Self::{}({}) => {{{}}}",
-            variant_name,
-            serialize_attr.join(","),
-            serialize_code.join("")
-        ));
+        if variant.fields.is_empty() {
+            pushes.push(format!(
+                "Self::{} => ()",
+                variant_name,
+            ));
+        } else {
+            pushes.push(format!(
+                "Self::{}({}) => {{{}}}",
+                variant_name,
+                serialize_attr.join(","),
+                serialize_code.join("")
+            ));
+        }
+        
         i += 1;
     }
     let get_discrimenator = format!("match self {{{}}}", matches.join(",\n\t"));
@@ -136,18 +210,28 @@ fn impl_serialize_enum_macro(ast: &syn::DeriveInput) -> TokenStream {
             }}", ty, j));
             j += 1;
         }
-        reverse_matches.push(format!("{} => {{
-            let ({}): ({});
-            {}
-            return Some(Self::{}({}))
-        }}",
-        i,
-        deserialize_attr.join(", "),
-        deserialize_types.join(", "),
-        deserialize_code.join("\n"),
-        variant.ident,
-        deserialize_attr.join(","),
-        ));
+        if variant.fields.is_empty() {
+            reverse_matches.push(format!("{} => {{
+                return Some(Self::{})
+            }}",
+            i,
+            variant.ident,
+            ));
+        } else {
+            reverse_matches.push(format!("{} => {{
+                let ({}): ({});
+                {}
+                return Some(Self::{}({}))
+            }}",
+            i,
+            deserialize_attr.join(", "),
+            deserialize_types.join(", "),
+            deserialize_code.join("\n"),
+            variant.ident,
+            deserialize_attr.join(","),
+            ));
+        }
+        
         i += 1;
     }
     let get_discrimenator = format!("let discrimenant: {};
@@ -173,7 +257,11 @@ fn impl_serialize_enum_macro(ast: &syn::DeriveInput) -> TokenStream {
             size_code.push(format!("field{}.size()", j));
             j += 1;
         }
-        get_size_variant.push(format!("Self::{}({}) => {}", variant_name, size_attr.join(","), size_code.join("+")));
+        if variant.fields.is_empty() {
+            get_size_variant.push(format!("Self::{} => 0", variant_name));
+        } else {
+            get_size_variant.push(format!("Self::{}({}) => {}", variant_name, size_attr.join(","), size_code.join("+")));
+        }
     }
     let get_size = format!("{} + match self {{{}}}",variant_indicator_size, get_size_variant.join(",\n\t"));
 
