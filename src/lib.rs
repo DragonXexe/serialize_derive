@@ -9,7 +9,7 @@ pub fn serialize_derive(input: TokenStream) -> TokenStream {
     let ast = syn::parse(input).unwrap();
 
     // Build the trait implementation
-    println!("{}", impl_serialize_macro(&ast).to_string());
+    // println!("{}", impl_serialize_macro(&ast).to_string());
     impl_serialize_macro(&ast)
 }
 fn impl_serialize_macro(ast: &syn::DeriveInput) -> TokenStream {
