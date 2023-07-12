@@ -1,8 +1,8 @@
 extern crate proc_macro;
 
 use proc_macro::TokenStream;
-use quote::{quote, ToTokens};
-use syn::Type;
+use quote::ToTokens;
+
 
 #[proc_macro_derive(Serialize)]
 pub fn serialize_derive(input: TokenStream) -> TokenStream {
