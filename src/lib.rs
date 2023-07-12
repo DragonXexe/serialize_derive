@@ -2,7 +2,7 @@ extern crate proc_macro;
 
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
-use syn::{Field, Type};
+use syn::Type;
 
 #[proc_macro_derive(Serialize)]
 pub fn serialize_derive(input: TokenStream) -> TokenStream {
@@ -68,7 +68,7 @@ fn impl_serialize_enum_macro(ast: &syn::DeriveInput) -> TokenStream {
         syn::Data::Union(_) => todo!(),
     };
     let attributes = &struct_data.variants;
-    let fields: &Vec<&syn::Ident> = &attributes.iter().map(|x| &x.ident).collect();
+    // let fields: &Vec<&syn::Ident> = &attributes.iter().map(|x| &x.ident).collect();
     // let types: &Vec<&Field> = &attributes.iter().map(|x| &x.fields).collect();
     let mut variant_indicator_type = "u8";
     let mut variant_indicator_size = 1;
