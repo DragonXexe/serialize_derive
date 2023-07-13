@@ -6,11 +6,8 @@ use quote::ToTokens;
 
 #[proc_macro_derive(Serialize)]
 pub fn serialize_derive(input: TokenStream) -> TokenStream {
-    let genarics: Vec<String> = dbg!(get_genarics(input.clone()));
-    let ast = syn::parse(dbg!(input)).unwrap();
-
-    // Build the trait implementation
-    // println!("{}", impl_serialize_macro(&ast).to_string());
+    let genarics: Vec<String> = get_genarics(input.clone());
+    let ast = syn::parse(input).unwrap();
     impl_serialize_macro(&ast, genarics)
 }
 fn impl_serialize_macro(ast: &syn::DeriveInput, genarics: Vec<String>) -> TokenStream {
@@ -43,7 +40,6 @@ fn impl_serialize_struct_macro(ast: &syn::DeriveInput, genarics: Vec<String>) ->
             genarics.join(", ")
         );
     }
-    dbg!(&genarics_impl_string, &genarics_string);
     
     
     let mut fields: Vec<(String, String)> = vec![];
@@ -354,9 +350,7 @@ fn get_genarics(input: TokenStream) -> Vec<String> {
                 }
             }
         }
-        token => {
-            dbg!("no genarcis found {}",token);
-        }
+        _ => (),
     }
     return generics;
 }
