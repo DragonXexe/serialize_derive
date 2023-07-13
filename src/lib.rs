@@ -6,7 +6,7 @@ use quote::ToTokens;
 
 #[proc_macro_derive(Serialize)]
 pub fn serialize_derive(input: TokenStream) -> TokenStream {
-    let genarics: Vec<String> = get_generarics(input.clone());
+    let genarics: Vec<String> = dbg!(get_genarics(input.clone()));
     let ast = syn::parse(dbg!(input)).unwrap();
 
     // Build the trait implementation
@@ -43,7 +43,7 @@ fn impl_serialize_struct_macro(ast: &syn::DeriveInput, genarics: Vec<String>) ->
             genarics.join(", ")
         );
     }
-
+    dbg!(&genarics_impl_string, &genarics_string);
     
     
     let mut fields: Vec<(String, String)> = vec![];
@@ -118,7 +118,7 @@ fn impl_serialize_struct_macro(ast: &syn::DeriveInput, genarics: Vec<String>) ->
     let get_size = format!("{}", get_size.join(" + "));
 
     let res = format!(
-        r#"impl{} Serialize{} for {} {{
+        r#"impl{} Serialize for {}{} {{
             fn serialize(self) -> serialr::Bytes {{
                 {}
             }}
@@ -131,8 +131,8 @@ fn impl_serialize_struct_macro(ast: &syn::DeriveInput, genarics: Vec<String>) ->
             
         }}"#,
         genarics_impl_string,
-        genarics_string,
         name,
+        genarics_string,
         serialize,
         deserialize,
         get_size,
@@ -148,6 +148,22 @@ fn impl_serialize_enum_macro(ast: &syn::DeriveInput, genarics: Vec<String>) -> T
         syn::Data::Enum(r#enum) => r#enum,
         syn::Data::Union(_) => todo!(),
     };
+
+    // generate_generics
+    let genarics_impl_string: String;
+    let genarics_string: String;
+    if genarics.is_empty() {
+        genarics_impl_string = String::new();
+        genarics_string = String::new();
+    } else {
+        genarics_impl_string = format!("<{}>",
+            genarics.iter().map(|x|format!("{}: Serialize", x)).collect::<Vec<String>>().join(", ")
+        );
+        genarics_string = format!("<{}>",
+            genarics.join(", ")
+        );
+    }
+
     let attributes = &struct_data.variants;
     // let fields: &Vec<&syn::Ident> = &attributes.iter().map(|x| &x.ident).collect();
     // let types: &Vec<&Field> = &attributes.iter().map(|x| &x.fields).collect();
@@ -285,7 +301,7 @@ fn impl_serialize_enum_macro(ast: &syn::DeriveInput, genarics: Vec<String>) -> T
     let get_size = format!("{} + match self {{{}}}",variant_indicator_size, get_size_variant.join(",\n\t"));
 
     let res = format!(
-        r#"impl Serialize for {} {{
+        r#"impl{} Serialize for {}{} {{
             fn serialize(self) -> serialr::Bytes {{
                 {}
             }}
@@ -295,9 +311,10 @@ fn impl_serialize_enum_macro(ast: &syn::DeriveInput, genarics: Vec<String>) -> T
             fn size(&self) -> usize {{
                 {}
             }}
-            
         }}"#,
+        genarics_impl_string,
         name,
+        genarics_string,
         serialize,
         deserialize,
         get_size,
@@ -306,7 +323,7 @@ fn impl_serialize_enum_macro(ast: &syn::DeriveInput, genarics: Vec<String>) -> T
 }
 
 
-fn get_generarics(input: TokenStream) -> Vec<String> {
+fn get_genarics(input: TokenStream) -> Vec<String> {
     let mut source = input.into_iter();
     while let Some(next) = source.next() {
         match next.to_string().as_str() {
@@ -315,22 +332,32 @@ fn get_generarics(input: TokenStream) -> Vec<String> {
             _ => ()
         }
     }
+    source.next();
     let mut generics: Vec<String> = vec![];
-    if source.next().unwrap().to_string() == "<" {
-        // ignore if its a lifetime
-        loop {
-            match source.next().unwrap().to_string().as_str() {
-                ">" => {
-                    break;
-                }
-                "'" => {
-                    source.next(); // consume the lifetime
-                }
-                genaric => {
-                    generics.push(genaric.to_string());
+    match source.next().unwrap().to_string().as_str() {
+        "<" => {
+            // ignore if its a lifetime
+            loop {
+                match source.next().unwrap().to_string().as_str() {
+                    ">" => {
+                        break;
+                    }
+                    "'" => {
+                        source.next(); // consume the lifetime
+                    }
+                    "," => {
+                        // ignore commas
+                    }
+                    genaric => {
+                        generics.push(genaric.to_string());
+                    }
                 }
             }
+        }
+        token => {
+            dbg!("no genarcis found {}",token);
         }
     }
     return generics;
 }
+
