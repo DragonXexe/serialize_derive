@@ -6,20 +6,21 @@ use quote::ToTokens;
 
 #[proc_macro_derive(Serialize)]
 pub fn serialize_derive(input: TokenStream) -> TokenStream {
-    let ast = syn::parse(input).unwrap();
+    let genarics: Vec<String> = get_generarics(input.clone());
+    let ast = syn::parse(dbg!(input)).unwrap();
 
     // Build the trait implementation
     // println!("{}", impl_serialize_macro(&ast).to_string());
-    impl_serialize_macro(&ast)
+    impl_serialize_macro(&ast, genarics)
 }
-fn impl_serialize_macro(ast: &syn::DeriveInput) -> TokenStream {
+fn impl_serialize_macro(ast: &syn::DeriveInput, genarics: Vec<String>) -> TokenStream {
     match ast.data {
-        syn::Data::Struct(_) => impl_serialize_struct_macro(ast),
-        syn::Data::Enum(_) => impl_serialize_enum_macro(ast),
+        syn::Data::Struct(_) => impl_serialize_struct_macro(ast, genarics),
+        syn::Data::Enum(_) => impl_serialize_enum_macro(ast, genarics),
         syn::Data::Union(_) => todo!(),
     }
 }
-fn impl_serialize_struct_macro(ast: &syn::DeriveInput) -> TokenStream {
+fn impl_serialize_struct_macro(ast: &syn::DeriveInput, genarics: Vec<String>) -> TokenStream {
     let name = &ast.ident;
     let attrs = &ast.data;
     let mut is_tuple_struct = false;
@@ -28,6 +29,22 @@ fn impl_serialize_struct_macro(ast: &syn::DeriveInput) -> TokenStream {
         syn::Data::Enum(_) => todo!(),
         syn::Data::Union(_) => todo!(),
     };
+    // generate_generics
+    let genarics_impl_string: String;
+    let genarics_string: String;
+    if genarics.is_empty() {
+        genarics_impl_string = String::new();
+        genarics_string = String::new();
+    } else {
+        genarics_impl_string = format!("<{}>",
+            genarics.iter().map(|x|format!("{}: Serialize", x)).collect::<Vec<String>>().join(", ")
+        );
+        genarics_string = format!("<{}>",
+            genarics.join(", ")
+        );
+    }
+
+    
     
     let mut fields: Vec<(String, String)> = vec![];
     let mut i = 0;
@@ -101,7 +118,7 @@ fn impl_serialize_struct_macro(ast: &syn::DeriveInput) -> TokenStream {
     let get_size = format!("{}", get_size.join(" + "));
 
     let res = format!(
-        r#"impl Serialize for {} {{
+        r#"impl{} Serialize{} for {} {{
             fn serialize(self) -> serialr::Bytes {{
                 {}
             }}
@@ -113,6 +130,8 @@ fn impl_serialize_struct_macro(ast: &syn::DeriveInput) -> TokenStream {
             }}
             
         }}"#,
+        genarics_impl_string,
+        genarics_string,
         name,
         serialize,
         deserialize,
@@ -121,7 +140,7 @@ fn impl_serialize_struct_macro(ast: &syn::DeriveInput) -> TokenStream {
     res.parse().unwrap()
 }
 
-fn impl_serialize_enum_macro(ast: &syn::DeriveInput) -> TokenStream {
+fn impl_serialize_enum_macro(ast: &syn::DeriveInput, genarics: Vec<String>) -> TokenStream {
     let name = &ast.ident;
     let attrs = &ast.data;
     let struct_data = match attrs {
@@ -284,4 +303,34 @@ fn impl_serialize_enum_macro(ast: &syn::DeriveInput) -> TokenStream {
         get_size,
     );
     res.parse().unwrap()
+}
+
+
+fn get_generarics(input: TokenStream) -> Vec<String> {
+    let mut source = input.into_iter();
+    while let Some(next) = source.next() {
+        match next.to_string().as_str() {
+            "struct" => break,
+            "enum" => break,
+            _ => ()
+        }
+    }
+    let mut generics: Vec<String> = vec![];
+    if source.next().unwrap().to_string() == "<" {
+        // ignore if its a lifetime
+        loop {
+            match source.next().unwrap().to_string().as_str() {
+                ">" => {
+                    break;
+                }
+                "'" => {
+                    source.next(); // consume the lifetime
+                }
+                genaric => {
+                    generics.push(genaric.to_string());
+                }
+            }
+        }
+    }
+    return generics;
 }
